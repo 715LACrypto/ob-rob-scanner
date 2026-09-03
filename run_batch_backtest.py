@@ -78,9 +78,14 @@ def main():
 
     results_df = pd.DataFrame(results)
     results_df = results_df.sort_values("profit_factor", ascending=False, na_position="last")
-    results_df.to_csv("results.csv", index=False)
-    print("\nSaved results.csv")
-    print(results_df.head(20))
+    results_df.to_csv("results.csv", index=False)  # kept for reference, but this disappears when the job ends
+
+    # Print the FULL table as CSV text directly into the log, since the log is what
+    # actually persists after the job's temporary computer gets wiped.
+    print("\n===== FULL RESULTS (copy everything between the START/END markers) =====")
+    print("=====CSV_START=====")
+    print(results_df.to_csv(index=False))
+    print("=====CSV_END=====")
 
 
 if __name__ == "__main__":
