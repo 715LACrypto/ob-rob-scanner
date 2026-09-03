@@ -76,13 +76,22 @@ def fetch_full_history(symbol: str, interval: str = "4h",
 
     all_frames = []
     cursor_end = end_ms
+    max_pages = 30       # safety cap: 30 pages x 1440 candles is far more than 2.5 years of 4h data
+    prev_earliest = None
 
-    while True:
+    for _ in range(max_pages):
         df = fetch_klines(symbol, interval=interval, end_ms=cursor_end)
         if df.empty:
             break
         all_frames.append(df)
         earliest = int(df["time"].min())
+
+        # safety: if the API returns the same earliest timestamp twice in a row,
+        # we're not making progress - stop instead of looping forever
+        if prev_earliest is not None and earliest >= prev_earliest:
+            break
+        prev_earliest = earliest
+
         if start_ms and earliest <= start_ms:
             break
         cursor_end = earliest - 1
