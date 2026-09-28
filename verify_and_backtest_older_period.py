@@ -10,6 +10,7 @@ Run this on Render, same as before - it needs real internet access to BingX.
 """
 
 import time
+from datetime import datetime, timezone
 from bingx_data import get_all_symbols, fetch_full_history
 from ob_rob_strategy import run_ob_rob_backtest, summarize_trades
 
@@ -33,10 +34,18 @@ def find_real_symbols():
 OLDER_START = "2021-01-01"
 OLDER_END = "2022-12-31"
 
+def to_ms(date_str: str) -> int:
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
 def run_older_period_test(symbol):
-    df = fetch_full_history(symbol, interval="4h", start_date=OLDER_START, end_date=OLDER_END)
+    start_ms = to_ms(OLDER_START)
+    end_ms = to_ms(OLDER_END)
+    df = fetch_full_history(symbol, interval="4h", start_ms=start_ms, end_ms=end_ms)
     if df is None or len(df) < 100:
         return {"symbol": symbol, "status": "insufficient_history_for_older_period", "candles_found": 0 if df is None else len(df)}
+    df = df.reset_index(drop=True)
+    df["time"] = df.index
     trades = run_ob_rob_backtest(df)
     summary = summarize_trades(trades)
     summary["symbol"] = symbol
