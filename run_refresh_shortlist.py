@@ -1,26 +1,23 @@
 """
-Refreshed backtest of the narrowed coin list, using TODAY as the end date instead
-of whenever the original 1156-coin sweep was run. Same window start (2024-01-01),
-just extended forward to catch anything that's happened since - including any
-recent strong bullish move - so we can see if it changed the numbers.
-
-Uses the real, verified symbol names (confirmed against BingX's live symbol list).
+Refreshed backtest of the FULL 14-coin Benjamini-Hochberg survivor list, using
+TODAY as the end date instead of whenever the original sweep was run. Same
+start date (2024-01-01), extended forward to catch anything that's happened
+since - including any recent strong bullish move.
 
 Run this on Render - it needs real internet access to BingX.
 """
 
 import time
 from datetime import datetime, timezone
-import pandas as pd
-
-from bingx_data import fetch_full_history
+from bingx_data import get_all_symbols, fetch_full_history
 from ob_rob_strategy import run_ob_rob_backtest, summarize_trades
 
 SYMBOLS = [
-    "DOT-USDT", "IOTA-USDT", "YFI-USDT",
-    "WLFI-USDT", "WLFI-USDC",
-    "0G-USDT", "GRAMTON-USDT",
-    "NCSKTSLA2USD-USDT", "NCSKQCOM2USD-USDT", "NCSKSKHYNIX2USD-USDT",
+    "NCSKRDW2USD-USDT", "NCSKNVD2USD-USDT", "NCSKBB2USD-USDT",
+    "GRAMTON-USDT", "NCSKTTWO2USD-USDT",
+    "NCSKSKHYNIX2USD-USDT", "NCSKQCOM2USD-USDT", "NCSKTSLA2USD-USDT",
+    "WLFI-USDT", "0G-USDT", "WLFI-USDC",
+    "YFI-USDT", "DOT-USDT", "IOTA-USDT",
 ]
 
 INTERVAL = "4h"
@@ -33,6 +30,11 @@ def to_ms(date_str: str) -> int:
 
 
 def main():
+    live_symbols = set(get_all_symbols())
+    print(f"Live symbol count from BingX right now: {len(live_symbols)}")
+    for s in SYMBOLS:
+        print(f"  {s}: {'FOUND' if s in live_symbols else 'NOT FOUND ON BINGX RIGHT NOW'}")
+
     start_ms = to_ms(START_DATE)
     end_ms = int(time.time() * 1000)
 
