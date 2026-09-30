@@ -122,23 +122,45 @@ def main():
     results = []
 
     from binance_data import fetch_full_history as fetch_binance
-    # TODO: fill in the other 4 approved crypto/stock symbols here
     CRYPTO = {
         "DOT-USDT": "DOTUSDT",
         "YFI-USDT": "YFIUSDT",
         "IOTA-USDT": "IOTAUSDT",
+        "WLFI-USDT": "WLFIUSDT",
+        "0G-USDT": "0GUSDT",
+        "WLFI-USDC": "WLFIUSDC",
     }
     print("===== CRYPTO (via Binance, true full history since listing) =====")
     for orig_symbol, binance_symbol in CRYPTO.items():
         print(f"\n[{orig_symbol}]")
-        df = fetch_binance(binance_symbol, interval="4h")
+        try:
+            df = fetch_binance(binance_symbol, interval="4h")
+        except Exception as e:
+            print(f"  SKIPPED - no data on Binance for {binance_symbol}: {e}")
+            continue
         print(f"  candles: {len(df)}")
         run_with_regime_split(df, orig_symbol, ma_period=1200, results=results)
         time.sleep(0.5)
 
+    # GRANTOM only exists on BingX, not Binance - pull its history straight from
+    # BingX instead (earliest available candles it has, not an arbitrary cutoff).
+    from bingx_data import fetch_full_history as fetch_bingx
+    print("\n===== GRANTOM (via BingX only - not on Binance) =====")
+    try:
+        df = fetch_bingx("GRANTOM-USDT", interval="4h")
+        print(f"  candles: {len(df)}")
+        run_with_regime_split(df, "GRANTOM-USDT", ma_period=1200, results=results)
+    except Exception as e:
+        print(f"  SKIPPED - {e}")
+
     from stock_data import fetch_full_history as fetch_stock
     STOCKS = {
+        "NCSKRDW2USD-USDT": "RDW",
+        "NCSKNVD2USD-USDT": "NVDA",
         "NCSKBB2USD-USDT": "BB",
+        "NCSKTTWO2USD-USDT": "TTWO",
+        "NCSKSKHYNIX2USD-USDT": "000660.KS",
+        "NCSKQCOM2USD-USDT": "QCOM",
         "NCSKTSLA2USD-USDT": "TSLA",
     }
     print("\n===== TOKENIZED STOCKS (via real stock price, true full history since IPO) =====")
