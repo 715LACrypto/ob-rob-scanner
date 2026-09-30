@@ -1,25 +1,17 @@
 """
-The full, proper backtest - every metric a real trader/firm would check:
+Full professional backtest - every metric a real trading firm checks, for all
+approved coins, from each asset's real ICO/listing date (crypto) or real IPO
+date (stocks), split into bull/bear using each asset's OWN moving average.
 
-  - profit_factor, win_rate, total_R  (the basics, total_R = "total RR")
-  - max_drawdown_R                    (worst losing stretch, peak to bottom)
-  - consistency_score                 (avg R per trade / volatility of results)
-  - trades_per_week                   (how often it actually fires)
+MA: 1200-period on 4h candles for crypto (1200 x 4h = 200 days, same real-time
+window as a standard 200-day MA, just expressed in 4h bars since that's this
+strategy's timeframe). 200-period on daily bars for stocks (= 200 days).
 
-Two things fixed from the last version:
+Metrics: win rate, profit factor, total R, avg R per trade, max drawdown (R),
+max consecutive losses, largest win (R), largest loss (R), consistency score,
+trades per week, recovery factor (total R / max drawdown).
 
-1. TRUE full history for every asset - no arbitrary start date. Crypto pulls
-   from whenever Binance actually has data (real listing date). Stocks pull
-   from 1970 (Yahoo just returns whatever real history exists from the
-   actual IPO onward - NVDA from 1999, QCOM from 1991, etc, not a guessed
-   cutoff).
-
-2. Bull vs bear is no longer assumed by calendar year (2021=bull, 2022=bear
-   was a guess, not proof). Instead, EVERY candle is classified using that
-   asset's OWN 200-day moving average: price above its own MA at that moment
-   = bull period, below = bear period. Each trade is then sorted into
-   "happened during a bull period" or "happened during a bear period" based
-   on real price data at that exact moment, not an assumed year label.
+FILL IN THE 4 MISSING SYMBOLS BELOW (marked TODO) before running.
 
 Run this on Render.
 """
@@ -41,10 +33,17 @@ def calc_metrics(trades):
     equity = 0.0
     peak = 0.0
     max_dd = 0.0
+    consec_losses = 0
+    max_consec_losses = 0
     for t in closed_sorted:
         equity += t.pnl_r
         peak = max(peak, equity)
         max_dd = max(max_dd, peak - equity)
+        if t.outcome == "SL":
+            consec_losses += 1
+            max_consec_losses = max(max_consec_losses, consec_losses)
+        else:
+            consec_losses = 0
 
     wins = [t for t in closed if t.outcome == "TP"]
     losses = [t for t in closed if t.outcome == "SL"]
@@ -63,6 +62,10 @@ def calc_metrics(trades):
     std_r = statistics.stdev(r_values) if len(r_values) > 1 else 0
     consistency = (avg_r / std_r) if std_r > 0 else 0
 
+    largest_win = max((t.pnl_r for t in wins), default=0)
+    largest_loss = min((t.pnl_r for t in losses), default=0)
+    recovery_factor = (total_r / max_dd) if max_dd > 0 else float('inf')
+
     return {
         "status": "ok",
         "num_trades": len(trades),
@@ -74,17 +77,16 @@ def calc_metrics(trades):
         "profit_factor": round(profit_factor, 2) if profit_factor != float('inf') else "inf",
         "avg_R_per_trade": round(avg_r, 3),
         "max_drawdown_R": round(max_dd, 2),
-        "trades_per_week": round(trades_per_week, 2),
+        "max_consec_losses": max_consec_losses,
+        "largest_win_R": round(largest_win, 2),
+        "largest_loss_R": round(largest_loss, 2),
         "consistency_score": round(consistency, 3),
+        "trades_per_week": round(trades_per_week, 2),
+        "recovery_factor": round(recovery_factor, 2) if recovery_factor != float('inf') else "inf",
     }
 
 
 def classify_regime(df, ma_period):
-    """
-    Returns an array the same length as df: 'bull' where close is above its
-    own rolling moving average at that point, 'bear' where below, None where
-    there isn't enough history yet to compute the average.
-    """
     ma = pd.Series(df['close'].values).rolling(window=ma_period, min_periods=ma_period).mean().values
     regime = []
     for i in range(len(df)):
@@ -120,33 +122,38 @@ def main():
     results = []
 
     from binance_data import fetch_full_history as fetch_binance
-    CRYPTO = {"DOT-USDT": "DOTUSDT", "YFI-USDT": "YFIUSDT", "IOTA-USDT": "IOTAUSDT"}
+    # TODO: fill in the other 4 approved crypto/stock symbols here
+    CRYPTO = {
+        "DOT-USDT": "DOTUSDT",
+        "YFI-USDT": "YFIUSDT",
+        "IOTA-USDT": "IOTAUSDT",
+    }
     print("===== CRYPTO (via Binance, true full history since listing) =====")
     for orig_symbol, binance_symbol in CRYPTO.items():
         print(f"\n[{orig_symbol}]")
-        df = fetch_binance(binance_symbol, interval="4h")  # no start_ms = earliest available
+        df = fetch_binance(binance_symbol, interval="4h")
         print(f"  candles: {len(df)}")
-        run_with_regime_split(df, orig_symbol, ma_period=1200, results=results)  # 1200x4h = 200 days
+        run_with_regime_split(df, orig_symbol, ma_period=1200, results=results)
         time.sleep(0.5)
 
     from stock_data import fetch_full_history as fetch_stock
     STOCKS = {
-        "NCSKRDW2USD-USDT": "RDW", "NCSKNVD2USD-USDT": "NVDA", "NCSKBB2USD-USDT": "BB",
-        "NCSKTTWO2USD-USDT": "TTWO", "NCSKQCOM2USD-USDT": "QCOM", "NCSKTSLA2USD-USDT": "TSLA",
-        "NCSKSKHYNIX2USD-USDT": "000660.KS",
+        "NCSKBB2USD-USDT": "BB",
+        "NCSKTSLA2USD-USDT": "TSLA",
     }
     print("\n===== TOKENIZED STOCKS (via real stock price, true full history since IPO) =====")
     for orig_symbol, ticker in STOCKS.items():
         print(f"\n[{orig_symbol}] via {ticker}")
-        df = fetch_stock(ticker, start="1970-01-01")  # Yahoo just returns from actual IPO onward
+        df = fetch_stock(ticker, start="1970-01-01")
         print(f"  candles: {len(df)}")
-        run_with_regime_split(df, orig_symbol, ma_period=200, results=results)  # daily bars = 200 real days
+        run_with_regime_split(df, orig_symbol, ma_period=200, results=results)
         time.sleep(0.5)
 
     print("\n===== FULL RESULTS TABLE (copy this whole block) =====")
     cols = ["label", "regime", "status", "num_trades", "num_closed", "wins", "losses",
             "win_rate", "total_R", "profit_factor", "avg_R_per_trade", "max_drawdown_R",
-            "trades_per_week", "consistency_score"]
+            "max_consec_losses", "largest_win_R", "largest_loss_R",
+            "trades_per_week", "consistency_score", "recovery_factor"]
     print(",".join(cols))
     for r in results:
         print(",".join(str(r.get(c, "")) for c in cols))
