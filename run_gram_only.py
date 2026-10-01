@@ -1,16 +1,18 @@
 """
-Searches BingX's live symbol list for anything containing "GRAM" so we can
-find the real symbol name instead of guessing again. Run this on Render.
+Just tests GRAMTON-USDT on its own.
+Same metrics, same bull/bear split as the full test. Run this on Render.
 """
 
-from bingx_data import get_all_symbols
+from run_full_professional_backtest import run_with_regime_split
+from bingx_data import fetch_full_history as fetch_bingx
 
 
 def main():
-    symbols = get_all_symbols()
-    print(f"total symbols: {len(symbols)}")
-    matches = [s for s in symbols if "GRAM" in s.upper()]
-    print(f"matches containing GRAM: {matches}")
+    results = []
+    print("[GRAMTON-USDT]")
+    df = fetch_bingx("GRAMTON-USDT", interval="4h")
+    print(f"  candles: {len(df)}")
+    run_with_regime_split(df, "GRAMTON-USDT", ma_period=1200, results=results)
 
 
 if __name__ == "__main__":
