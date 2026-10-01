@@ -1,18 +1,16 @@
 """
-Just tests GRAM-USDT on its own (the coin we had wrong as "GRANTOM").
-Same metrics, same bull/bear split as the full test. Run this on Render.
+Searches BingX's live symbol list for anything containing "GRAM" so we can
+find the real symbol name instead of guessing again. Run this on Render.
 """
 
-from run_full_professional_backtest import run_with_regime_split
-from bingx_data import fetch_full_history as fetch_bingx
+from bingx_data import get_all_symbols
 
 
 def main():
-    results = []
-    print("[GRAM-USDT]")
-    df = fetch_bingx("GRAM-USDT", interval="4h")
-    print(f"  candles: {len(df)}")
-    run_with_regime_split(df, "GRAM-USDT", ma_period=1200, results=results)
+    symbols = get_all_symbols()
+    print(f"total symbols: {len(symbols)}")
+    matches = [s for s in symbols if "GRAM" in s.upper()]
+    print(f"matches containing GRAM: {matches}")
 
 
 if __name__ == "__main__":
