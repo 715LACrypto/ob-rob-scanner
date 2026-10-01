@@ -147,9 +147,9 @@ def main():
     from bingx_data import fetch_full_history as fetch_bingx
     print("\n===== GRANTOM (via BingX only - not on Binance) =====")
     try:
-        df = fetch_bingx("GRANTOM-USDT", interval="4h")
+        df = fetch_bingx("GRAM-USDT", interval="4h")
         print(f"  candles: {len(df)}")
-        run_with_regime_split(df, "GRANTOM-USDT", ma_period=1200, results=results)
+        run_with_regime_split(df, "GRAM-USDT", ma_period=1200, results=results)
     except Exception as e:
         print(f"  SKIPPED - {e}")
 
