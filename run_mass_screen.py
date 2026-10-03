@@ -129,6 +129,7 @@ def main():
         result = analyze_symbol(symbol)
         if result:
             all_results.append(result)
+            print(f"  RAW: {result}")
         if (i + 1) % 25 == 0:
             print(f"  ...progress: {i+1}/{len(batch)} screened, {len(all_results)} passed the basic filters so far")
         time.sleep(0.3)
