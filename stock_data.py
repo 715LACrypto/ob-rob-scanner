@@ -34,7 +34,7 @@ def fetch_full_history(ticker: str, start: str = "2015-01-01", end: str = None) 
         data.columns = [c[0] for c in data.columns]
 
     df = pd.DataFrame({
-        "time": (pd.to_datetime(data["Date"]).astype("int64") // 1_000_000),
+        "time": ((pd.to_datetime(data["Date"]) - pd.Timestamp("1970-01-01")) // pd.Timedelta(milliseconds=1)),
         "open": data["Open"].astype(float),
         "high": data["High"].astype(float),
         "low": data["Low"].astype(float),
