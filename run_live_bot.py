@@ -252,10 +252,19 @@ def get_positions():
 
 def get_recent_cids(symbol, days=12):
     """Every client order id we have ever placed on this symbol recently (any status)."""
-    data = api("GET", "/openApi/swap/v2/trade/allOrders",
-               {"symbol": symbol, "startTime": now_ms() - days * 86400 * 1000, "endTime": now_ms(), "limit": 500})
-    orders = (data or {}).get("orders", []) if isinstance(data, dict) else (data or [])
-    return {str(o.get("clientOrderID") or o.get("clientOrderId") or "") for o in orders} - {""}
+    out = set()
+    end = now_ms()
+    left = days
+    while left > 0:                      # BingX allows max 7 days per query
+        span = min(left, 6)
+        start = end - span * 86400 * 1000
+        data = api("GET", "/openApi/swap/v2/trade/allOrders",
+                   {"symbol": symbol, "startTime": start, "endTime": end, "limit": 500})
+        orders = (data or {}).get("orders", []) if isinstance(data, dict) else (data or [])
+        out |= {str(o.get("clientOrderID") or o.get("clientOrderId") or "") for o in orders}
+        end = start
+        left -= span
+    return out - {""}
 
 
 def order_cid(o):
