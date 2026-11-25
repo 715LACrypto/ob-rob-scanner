@@ -36,15 +36,15 @@ import pandas as pd
 
 # ------------------------------------------------------------------ settings
 BASE = "https://open-api.bingx.com"
-API_KEY = os.environ.get("BINGX_API_KEY", "")
-API_SECRET = os.environ.get("BINGX_API_SECRET", "")
+API_KEY = os.environ.get("BINGX_API_KEY", "").strip()
+API_SECRET = os.environ.get("BINGX_API_SECRET", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.0")) / 100.0
 MAX_OPEN_SETUPS = int(os.environ.get("MAX_OPEN_SETUPS", "4"))
 LEVERAGE = int(os.environ.get("LEVERAGE", "5"))
-INCLUDE_TIER_B = os.environ.get("INCLUDE_TIER_B", "0") == "1"
-TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
+INCLUDE_TIER_B = os.environ.get("INCLUDE_TIER_B", "1") == "1"
+TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 # strategy rules (same as the backtest)
 MIN_BARS, MAX_BARS, MIN_RISK = 10, 60, 0.02
