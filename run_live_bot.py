@@ -41,7 +41,9 @@ API_SECRET = os.environ.get("BINGX_API_SECRET", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.0")) / 100.0
 MAX_OPEN_SETUPS = int(os.environ.get("MAX_OPEN_SETUPS", "4"))
-LEVERAGE = int(os.environ.get("LEVERAGE", "5"))
+LEVERAGE = int(os.environ.get("LEVERAGE", "5"))          # only used if AUTO_LEVERAGE=0
+AUTO_LEVERAGE = os.environ.get("AUTO_LEVERAGE", "1") == "1"
+MAX_LEVERAGE = int(os.environ.get("MAX_LEVERAGE", "20"))  # hard cap for auto leverage
 INCLUDE_TIER_B = os.environ.get("INCLUDE_TIER_B", "1") == "1"
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -312,10 +314,35 @@ def place_entry(symbol, rob, label, equity, spec, hedge):
     return True, desc
 
 
-def ensure_margin_and_leverage(symbol, hedge):
+def pick_leverage(rob, labels, equity):
+    """Leverage for one setup. Enough to afford the positions, never so high that
+    liquidation (about 0.8/leverage away) would come before the stop loss."""
+    sl = rob["sl"]
+    total_notional = 0.0
+    worst_stop_frac = 0.0
+    for lb in labels:
+        entry = rob["prices"][lb]
+        dist = abs(entry - sl)
+        if dist <= 0:
+            continue
+        total_notional += (equity * RISK_PCT / 3.0) * entry / dist
+        worst_stop_frac = max(worst_stop_frac, dist / entry)
+    if total_notional <= 0:
+        return None, "no valid entries"
+    margin_budget = equity / max(MAX_OPEN_SETUPS, 1)      # leave room for other open setups
+    needed = max(1, math.ceil(total_notional / margin_budget))
+    safe_max = max(1, min(MAX_LEVERAGE, int(0.8 / worst_stop_frac)))
+    if needed > safe_max:
+        return None, (f"needs {needed}x to afford (position ${total_notional:.0f}) but only "
+                      f"{safe_max}x is safe for a {worst_stop_frac*100:.1f}% stop")
+    return needed, f"{needed}x (position ${total_notional:.0f}, widest stop {worst_stop_frac*100:.1f}%, safe max {safe_max}x)"
+
+
+def ensure_margin_and_leverage(symbol, hedge, leverage=None):
+    leverage = leverage or LEVERAGE
     for path, p in (("/openApi/swap/v2/trade/marginType", {"symbol": symbol, "marginType": "ISOLATED"}),
                     ("/openApi/swap/v2/trade/leverage",
-                     {"symbol": symbol, "side": "SHORT" if hedge else "BOTH", "leverage": LEVERAGE})):
+                     {"symbol": symbol, "side": "SHORT" if hedge else "BOTH", "leverage": leverage})):
         try:
             api("POST", path, p)
         except Exception as e:
@@ -407,8 +434,17 @@ def run():
                 log(f"  {symbol}: new setup skipped, already at max open setups ({MAX_OPEN_SETUPS})")
                 continue
             occupied += 1
+        lev = LEVERAGE
+        if AUTO_LEVERAGE:
+            lev, why = pick_leverage(rob, todo, equity)
+            if lev is None:
+                notify(f"{symbol}: setup skipped, {why}")
+                if not already_in:
+                    occupied -= 1
+                continue
+            log(f"  {symbol}: leverage {why}")
         if not DRY_RUN:
-            ensure_margin_and_leverage(symbol, hedge)
+            ensure_margin_and_leverage(symbol, hedge, lev)
         for lb in todo:
             try:
                 ok, desc = place_entry(symbol, rob, lb, equity, contracts[symbol], hedge)
