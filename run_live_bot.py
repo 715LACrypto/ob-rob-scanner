@@ -130,9 +130,13 @@ def fetch_closed_candles(symbol, limit=500):
         df[col] = df[col].astype(float)
     df["time"] = df["time"].astype("int64")
     df = df.sort_values("time").drop_duplicates("time").reset_index(drop=True)
-    # drop the candle that is still forming
+    # the candle that is still forming: we do not scan it, but we must know how high it has traded
+    forming = df[df["time"] + CANDLE_MS > now_ms()]
+    live_high = float(forming["high"].max()) if len(forming) else 0.0
     df = df[df["time"] + CANDLE_MS <= now_ms()].reset_index(drop=True)
-    return df[["time", "open", "high", "low", "close"]]
+    out = df[["time", "open", "high", "low", "close"]].copy()
+    out.attrs["live_high"] = live_high
+    return out
 
 
 # ------------------------------------------------------------------ strategy state machine
@@ -385,8 +389,14 @@ def run():
             _, robs, n = scan_series(df, skip_activation_fill=True)
             last_idx = n - 1
             last_close = float(df["close"].iloc[-1])
+            live_high = float(df.attrs.get("live_high", 0.0))
             for rob in robs:
                 want = desired_entries(rob, last_idx)
+                # an entry the current (still forming) candle has already traded up to counts as tested: leave it
+                tested_now = [lb for lb in want if rob["prices"][lb] <= max(live_high, last_close)]
+                if tested_now:
+                    log(f"  {symbol}: entries {tested_now} already tested by the current candle, left alone")
+                    want = [lb for lb in want if lb not in tested_now]
                 if want and last_close <= rob["tp"]:
                     log(f"  {symbol}: setup {rob['ob_time']} skipped, price already below its take profit")
                     want = []
