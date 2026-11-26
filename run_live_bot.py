@@ -275,17 +275,47 @@ def report_activity(minutes=6):
         data = api("GET", "/openApi/swap/v2/user/income",
                    {"incomeType": "REALIZED_PNL", "startTime": start, "endTime": end, "limit": 100})
         rows = data if isinstance(data, list) else (data or {}).get("data", []) or []
+        try:
+            eq = float(get_equity())
+        except Exception:
+            eq = 0.0
+        one_r = eq * RISK_PCT / 100.0
         for r in rows:
-            notify(f"TRADE CLOSED {r.get('symbol')}: realized {float(r.get('income') or 0):+.2f} USDT")
+            pnl = float(r.get('income') or 0)
+            icon = "🟢" if pnl > 0 else "🔴"
+            outcome = "WIN" if pnl > 0 else "LOSS"
+            lines = [f"{icon} TRADE CLOSED: {outcome}", f"Coin: {r.get('symbol')}",
+                     f"Result: {pnl:+.2f} USDT"]
+            if one_r > 0:
+                lines.append(f"R: {pnl / one_r:+.2f}R (1R = about {one_r:.2f} USDT)")
+            notify("\n".join(lines))
     except Exception as e:
         log(f"income check failed: {e}")
     try:
         data = api("GET", "/openApi/swap/v2/trade/allFillOrders",
                    {"startTs": start, "endTs": end, "tradingUnit": "COIN"})
         rows = (data or {}).get("fill_orders", []) if isinstance(data, dict) else (data or [])
+        names = {"t": "TOP entry", "m": "MID entry", "b": "BOTTOM entry"}
         for f in rows:
-            side = str(f.get("side") or f.get("orderType") or "")
-            notify(f"FILL {f.get('symbol')} {side} qty {f.get('qty')} @ {f.get('price')}")
+            sym = f.get("symbol")
+            side = str(f.get("side") or "")
+            lines = [f"✅ ENTRY FILLED: {sym}"]
+            try:
+                oid = str(f.get("orderId") or "")
+                od = api("GET", "/openApi/swap/v2/trade/order", {"symbol": sym, "orderId": oid})
+                od = od.get("order", od) if isinstance(od, dict) else {}
+                cid = str(od.get("clientOrderID") or od.get("clientOrderId") or "")
+                if cid.startswith("OR") and cid[-1] in names:
+                    lines.append(f"Entry: {names[cid[-1]]}")
+                lines.append(f"{side} {f.get('qty')} @ {f.get('price')}")
+                if od.get("stopLoss"):
+                    lines.append(f"🛑 SL: {od.get('stopLoss')}")
+                if od.get("takeProfit"):
+                    lines.append(f"🎯 TP: {od.get('takeProfit')}")
+            except Exception as e:
+                log(f"fill detail failed: {e}")
+                lines.append(f"{side} {f.get('qty')} @ {f.get('price')}")
+            notify("\n".join(lines))
     except Exception as e:
         log(f"fills check failed: {e}")
 
