@@ -41,6 +41,7 @@ API_SECRET = os.environ.get("BINGX_API_SECRET", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.0")) / 100.0
 MAX_OPEN_SETUPS = int(os.environ.get("MAX_OPEN_SETUPS", "4"))
+MAX_TOTAL_SETUPS = int(os.environ.get("MAX_TOTAL_SETUPS", "8"))   # safety: positions + waiting orders
 LEVERAGE = int(os.environ.get("LEVERAGE", "5"))          # only used if AUTO_LEVERAGE=0
 AUTO_LEVERAGE = os.environ.get("AUTO_LEVERAGE", "1") == "1"
 MAX_LEVERAGE = int(os.environ.get("MAX_LEVERAGE", "20"))  # hard cap for auto leverage
@@ -518,6 +519,7 @@ def run():
         except Exception:
             pass
     occupied = 0
+    pos_setups = 0
     for rank, symbol, rob, last_idx, want in setups:
         # only REAL positions / orders on BingX count, not simulated fills from the chart scan
         has_pos = bool(rob["open"]) and symbol in real_short_symbols
@@ -526,9 +528,12 @@ def run():
         has_ord = any(make_cid(symbol, rob["ob_time"], lb) in open_cids
                       or entry_key(symbol, rob["prices"][lb], pp) in open_price_keys
                       for lb in ENTRY_LABELS)
+        if has_pos:
+            pos_setups += 1
         if has_pos or has_ord:
             occupied += 1
-    log(f"setups occupying a slot: {occupied} / {MAX_OPEN_SETUPS}")
+    log(f"setups with a real position: {pos_setups} / {MAX_OPEN_SETUPS} | "
+        f"with position or resting orders: {occupied} / {MAX_TOTAL_SETUPS}")
 
     # 4. place orders for new setups (best-ranked coins first)
     for rank, symbol, rob, last_idx, want in sorted(setups, key=lambda s: s[0]):
@@ -550,8 +555,11 @@ def run():
             make_cid(symbol, rob["ob_time"], lb) in placed_before
             or entry_key(symbol, rob["prices"][lb], pprec) in placed_before for lb in ENTRY_LABELS)
         if not already_in:
-            if occupied >= MAX_OPEN_SETUPS:
-                log(f"  {symbol}: new setup skipped, already at max open setups ({MAX_OPEN_SETUPS})")
+            if pos_setups >= MAX_OPEN_SETUPS:
+                log(f"  {symbol}: new setup skipped, already {pos_setups} open positions (max {MAX_OPEN_SETUPS})")
+                continue
+            if occupied >= MAX_TOTAL_SETUPS:
+                log(f"  {symbol}: new setup skipped, already {occupied} setups with orders (max {MAX_TOTAL_SETUPS})")
                 continue
             occupied += 1
         lev = LEVERAGE
