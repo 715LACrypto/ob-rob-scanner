@@ -264,6 +264,32 @@ def get_positions():
     return data or []
 
 
+def report_activity(minutes=6):
+    """Telegram ping for fills and closed trades in the last few minutes.
+    Never lets a failure here stop the bot."""
+    if DRY_RUN:
+        return
+    end = now_ms()
+    start = end - minutes * 60 * 1000
+    try:
+        data = api("GET", "/openApi/swap/v2/user/income",
+                   {"incomeType": "REALIZED_PNL", "startTime": start, "endTime": end, "limit": 100})
+        rows = data if isinstance(data, list) else (data or {}).get("data", []) or []
+        for r in rows:
+            notify(f"TRADE CLOSED {r.get('symbol')}: realized {float(r.get('income') or 0):+.2f} USDT")
+    except Exception as e:
+        log(f"income check failed: {e}")
+    try:
+        data = api("GET", "/openApi/swap/v2/trade/allFillOrders",
+                   {"startTs": start, "endTs": end, "tradingUnit": "COIN"})
+        rows = (data or {}).get("fill_orders", []) if isinstance(data, dict) else (data or [])
+        for f in rows:
+            side = str(f.get("side") or f.get("orderType") or "")
+            notify(f"FILL {f.get('symbol')} {side} qty {f.get('qty')} @ {f.get('price')}")
+    except Exception as e:
+        log(f"fills check failed: {e}")
+
+
 def get_recent_cids(symbol, days=12, pprec=6):
     """Every client order id we have ever placed on this symbol recently (any status)."""
     out = set()
@@ -359,7 +385,7 @@ def pick_leverage(rob, labels, equity):
         worst_stop_frac = max(worst_stop_frac, dist / entry)
     if total_notional <= 0:
         return None, "no valid entries"
-    margin_budget = equity / max(MAX_OPEN_SETUPS, 1)      # leave room for other open setups
+    margin_budget = equity * 0.8 / max(MAX_OPEN_SETUPS, 1)   # keep 20% of the account free
     needed = max(1, math.ceil(total_notional / margin_budget))
     safe_max = max(1, min(MAX_LEVERAGE, int(0.8 / worst_stop_frac)))
     if needed > safe_max:
@@ -389,6 +415,7 @@ def run():
     open_orders = get_open_orders()
     positions = get_positions()
     log(f"equity {equity:.2f} USDT | hedge mode: {hedge} | open orders: {len(open_orders)} | positions: {len(positions)}")
+    report_activity()
 
     # 1. scan every approved coin
     setups = []          # (priority, symbol, rob, last_idx)
@@ -499,14 +526,16 @@ def run():
             occupied += 1
         lev = LEVERAGE
         if AUTO_LEVERAGE:
-            lev, why = pick_leverage(rob, todo, equity)
+            full_set = [lb for lb in ENTRY_LABELS if rob["pct"][lb] > MIN_RISK]   # whole setup, so leverage stays stable
+            lev, why = pick_leverage(rob, full_set, equity)
             if lev is None:
                 notify(f"{symbol}: setup skipped, {why}")
                 if not already_in:
                     occupied -= 1
                 continue
             log(f"  {symbol}: leverage {why}")
-        if not DRY_RUN:
+        busy_symbols = real_short_symbols | {o.get("symbol") for o in open_orders}
+        if not DRY_RUN and symbol not in busy_symbols:      # never change leverage under an open trade or order
             ensure_margin_and_leverage(symbol, hedge, lev)
         for lb in todo:
             try:
