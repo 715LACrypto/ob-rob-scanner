@@ -113,8 +113,16 @@ def api(method, path, params=None, auth=True):
 
 # ------------------------------------------------------------------ market data
 def fetch_closed_candles(symbol, limit=500):
-    data = api("GET", "/openApi/swap/v3/quote/klines",
-               {"symbol": symbol, "interval": "4h", "limit": limit}, auth=False)
+    data = None
+    for attempt in range(4):             # BingX sometimes says "try again later" (code 100410)
+        try:
+            data = api("GET", "/openApi/swap/v3/quote/klines",
+                       {"symbol": symbol, "interval": "4h", "limit": limit}, auth=False)
+            break
+        except ApiError as e:
+            if attempt == 3 or "100410" not in str(e):
+                raise
+            time.sleep(1.5 * (attempt + 1))
     if not data:
         return pd.DataFrame(columns=["time", "open", "high", "low", "close"])
     df = pd.DataFrame(data)
@@ -364,6 +372,7 @@ def run():
     setups = []          # (priority, symbol, rob, last_idx)
     desired_cids = set()
     cid_info = {}
+    failed_symbols = set()
     for rank, symbol in enumerate(approved_list()):
         if symbol not in contracts:
             log(f"  {symbol}: not listed on BingX perpetuals, skipped")
@@ -375,8 +384,15 @@ def run():
                 continue
             _, robs, n = scan_series(df, skip_activation_fill=True)
             last_idx = n - 1
+            last_close = float(df["close"].iloc[-1])
             for rob in robs:
                 want = desired_entries(rob, last_idx)
+                if want and last_close <= rob["tp"]:
+                    log(f"  {symbol}: setup {rob['ob_time']} skipped, price already below its take profit")
+                    want = []
+                elif want and last_close >= rob["sl"]:
+                    log(f"  {symbol}: setup {rob['ob_time']} skipped, price already above its stop loss")
+                    want = []
                 for label in want:
                     cid = make_cid(symbol, rob["ob_time"], label)
                     desired_cids.add(cid)
@@ -386,12 +402,15 @@ def run():
                 log(f"  {symbol}: {len(robs)} live setup(s)")
         except Exception as e:
             log(f"  {symbol}: scan failed: {e}")
+            failed_symbols.add(symbol)
         time.sleep(0.15)
 
     # 2. cancel our stale orders
     ours_open = [o for o in open_orders if order_cid(o).startswith("OR")
                  and o.get("symbol") in approved_list()]
     for o in ours_open:
+        if o.get("symbol") in failed_symbols:
+            continue                      # scan failed this run, do not touch its orders
         if order_cid(o) not in desired_cids:
             msg = f"cancel stale order {o.get('symbol')} {order_cid(o)} @ {o.get('price')}"
             if DRY_RUN:
@@ -435,7 +454,7 @@ def run():
         todo = [lb for lb in want if cids[lb] not in placed_before]
         if not todo:
             continue
-        already_in = bool(rob["open"]) or any(
+        already_in = (bool(rob["open"]) and symbol in real_short_symbols) or any(
             make_cid(symbol, rob["ob_time"], lb) in placed_before for lb in ENTRY_LABELS)
         if not already_in:
             if occupied >= MAX_OPEN_SETUPS:
