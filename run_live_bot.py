@@ -264,7 +264,7 @@ def get_positions():
     return data or []
 
 
-def get_recent_cids(symbol, days=12):
+def get_recent_cids(symbol, days=12, pprec=6):
     """Every client order id we have ever placed on this symbol recently (any status)."""
     out = set()
     end = now_ms()
@@ -276,9 +276,27 @@ def get_recent_cids(symbol, days=12):
                    {"symbol": symbol, "startTime": start, "endTime": end, "limit": 500})
         orders = (data or {}).get("orders", []) if isinstance(data, dict) else (data or [])
         out |= {str(o.get("clientOrderID") or o.get("clientOrderId") or "") for o in orders}
+        out |= price_keys(symbol, orders, pprec)
         end = start
         left -= span
     return out - {""}
+
+
+def price_keys(symbol, orders, pprec):
+    """Backup duplicate check that does NOT depend on client order ids:
+    one key per SELL order we have (any status) at a given price on this symbol."""
+    keys = set()
+    for o in orders:
+        try:
+            if str(o.get("side", "")).upper() == "SELL" and float(o.get("price") or 0) > 0:
+                keys.add(f"{symbol}@{float(o['price']):.{pprec}f}")
+        except Exception:
+            pass
+    return keys
+
+
+def entry_key(symbol, price, pprec):
+    return f"{symbol}@{round(price, pprec):.{pprec}f}"
 
 
 def order_cid(o):
@@ -446,7 +464,11 @@ def run():
     for rank, symbol, rob, last_idx, want in setups:
         # only REAL positions / orders on BingX count, not simulated fills from the chart scan
         has_pos = bool(rob["open"]) and symbol in real_short_symbols
-        has_ord = any(make_cid(symbol, rob["ob_time"], lb) in open_cids for lb in ENTRY_LABELS)
+        pp = int(contracts[symbol].get("pricePrecision", 6))
+        open_price_keys = price_keys(symbol, open_orders, pp)
+        has_ord = any(make_cid(symbol, rob["ob_time"], lb) in open_cids
+                      or entry_key(symbol, rob["prices"][lb], pp) in open_price_keys
+                      for lb in ENTRY_LABELS)
         if has_pos or has_ord:
             occupied += 1
     log(f"setups occupying a slot: {occupied} / {MAX_OPEN_SETUPS}")
@@ -457,15 +479,19 @@ def run():
             continue
         cids = {lb: make_cid(symbol, rob["ob_time"], lb) for lb in want}
         try:
-            placed_before = get_recent_cids(symbol)
+            pprec = int(contracts[symbol].get("pricePrecision", 6))
+            placed_before = get_recent_cids(symbol, pprec=pprec)
+            placed_before |= price_keys(symbol, open_orders, pprec)    # currently open orders too
         except Exception as e:
             notify(f"Could not check order history for {symbol}, NOT placing (safety): {e}")
             continue
-        todo = [lb for lb in want if cids[lb] not in placed_before]
+        todo = [lb for lb in want if cids[lb] not in placed_before
+                and entry_key(symbol, rob["prices"][lb], pprec) not in placed_before]
         if not todo:
             continue
         already_in = (bool(rob["open"]) and symbol in real_short_symbols) or any(
-            make_cid(symbol, rob["ob_time"], lb) in placed_before for lb in ENTRY_LABELS)
+            make_cid(symbol, rob["ob_time"], lb) in placed_before
+            or entry_key(symbol, rob["prices"][lb], pprec) in placed_before for lb in ENTRY_LABELS)
         if not already_in:
             if occupied >= MAX_OPEN_SETUPS:
                 log(f"  {symbol}: new setup skipped, already at max open setups ({MAX_OPEN_SETUPS})")
