@@ -406,9 +406,17 @@ def run():
 
     # 3. which setups already occupy a slot
     open_cids = {order_cid(o) for o in ours_open}
+    real_short_symbols = set()
+    for p in positions:
+        try:
+            if abs(float(p.get("positionAmt") or 0)) > 0:
+                real_short_symbols.add(p.get("symbol"))
+        except Exception:
+            pass
     occupied = 0
     for rank, symbol, rob, last_idx, want in setups:
-        has_pos = bool(rob["open"])
+        # only REAL positions / orders on BingX count, not simulated fills from the chart scan
+        has_pos = bool(rob["open"]) and symbol in real_short_symbols
         has_ord = any(make_cid(symbol, rob["ob_time"], lb) in open_cids for lb in ENTRY_LABELS)
         if has_pos or has_ord:
             occupied += 1
